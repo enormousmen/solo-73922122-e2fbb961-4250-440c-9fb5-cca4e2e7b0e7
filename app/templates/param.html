@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ param.param_no }} · 参数详情{% endblock %}
+{% block content %}
+
+<p class="small"><a href="/">← 返回总览</a> / 参数详情</p>
+
+<div class="card">
+  <h2>{{ param.param_no }} <span class="small">{{ param.param_name }}（{{ param.device_no }}）</span></h2>
+  <dl class="kv">
+    <dt>当前生效值</dt>
+    <dd class="mono" style="font-size:16px"><b>{{ param.param_value }}</b> {{ param.unit }} · version {{ param.version }}</dd>
+    <dt>最近改动事务</dt>
+    <dd class="mono">{{ param.updated_gxid or 'NULL（种子数据）' }} <span class="small">{{ param.updated_at }}</span></dd>
+  </dl>
+
+  <form method="post" action="/params/{{ param.param_no }}/lock-demo" class="form-row">
+    <button class="btn btn-ghost" type="submit">模拟其他会话修改此参数（验证锁是否仍在）</button>
+    <span class="small">测试会话设置 lock_timeout=3s 且最终一定回滚，不会改动参数。</span>
+  </form>
+  {% if lock_result %}
+    {% set parts = lock_result.split('|', 2) %}
+    {% set flag = parts[0] %}
+    <div class="banner {{ 'banner-danger' if flag == 'blocked' else ('banner-ok' if flag == 'acquired' else 'banner-warn') }}">
+      {% if flag == 'blocked' %}🔒 修改被阻塞/拒绝——预备事务的锁仍在。
+      {% elif flag == 'acquired' %}🔓 测试会话直接拿到了行锁（当前无预备事务锁定该行）。
+      {% else %}⚠️ 锁测试结果不确定。{% endif %}
+      {% if parts|length > 1 and parts[1] %}耗时约 {{ parts[1] }} ms。{% endif %}
+      {% if parts|length > 2 %}<div class="small">{{ parts[2] }}</div>{% endif %}
+    </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>发布单 / 关联事务</h2>
+  <table class="data">
+    <thead><tr><th>事务号</th><th>基线值</th><th>目标值</th><th>时 间</th><th>预备中</th><th>恢复状态</th><th></th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr>
+        <td class="mono">{{ o.gxid }}</td>
+        <td class="mono">{{ o.baseline_value }}</td>
+        <td class="mono">{{ o.intended_value }}</td>
+        <td class="small">{{ o.created_at }}</td>
+        <td>{% if o.prepared %}<span class="badge badge-warn">是 · 锁保留</span>{% else %}<span class="small">否</span>{% endif %}</td>
+        <td>
+          {% if o.snap %}<span class="badge badge-{{ o.snap.tone }}">{{ o.snap.state_label }}</span>{% endif %}
+        </td>
+        <td><a class="btn btn-sm btn-ghost" href="/txn/{{ o.gxid }}">去恢复页</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="small">该参数还没有发布单。可在首页构造样例并指定此参数号。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}校准参数发布恢复台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="/">🛠️ 校准参数发布恢复台</a>
+    <form class="search" action="/search" method="get" role="search">
+      <input type="text" name="q" placeholder="按号查：参数号 CAL-... / 设备号 / 事务号 GX-..." value="{{ q|default('') }}">
+      <button type="submit">查询</button>
+    </form>
+  </div>
+</header>
+<main class="wrap">
+  {% block content %}{% endblock %}
+  <footer class="footer">
+    FastAPI · PostgreSQL 预备事务(2PC) · SQLite 协调决定/网页登记簿 ·
+    <a href="/healthz">healthz</a> · <a href="/docs">API docs</a>
+  </footer>
+</main>
+</body>
+</html>

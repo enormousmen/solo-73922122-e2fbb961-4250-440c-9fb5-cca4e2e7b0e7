@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}操作失败{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>操作未能执行</h2>
+  <div class="banner banner-danger">{{ message }}</div>
+  <p><a class="btn btn-primary" href="javascript:history.back()">返回上一页</a> <a class="btn btn-ghost" href="/">回总览</a></p>
+</div>
+{% endblock %}

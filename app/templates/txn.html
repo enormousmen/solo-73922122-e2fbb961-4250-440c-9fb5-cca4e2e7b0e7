@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}事务 {{ s.gxid }} · 恢复台{% endblock %}
+{% block content %}
+
+<p class="small"><a href="/">← 返回总览</a></p>
+
+{% if msg %}
+<div class="banner banner-{{ tone }}">{{ msg }}</div>
+{% endif %}
+
+<div class="card">
+  <h2>
+    事务恢复
+    <span class="mono" style="font-size:14px">{{ s.gxid }}</span>
+    <span class="badge badge-{{ s.tone }}" style="margin-left:8px">{{ s.state_label }}</span>
+  </h2>
+  <div class="banner banner-{{ s.tone }}" style="margin-bottom:4px">{{ s.advice }}</div>
+
+  <dl class="kv">
+    <dt>数据库事实</dt>
+    <dd>
+      {% if s.actual == 'OPEN' %}预备事务仍在（OPEN/PREPARED）
+      {% elif s.actual == 'COMMITTED' %}有强证据表明已提交（COMMITTED）
+      {% elif s.actual == 'ROLLED_BACK' %}证据表明已回滚（ROLLED_BACK）
+      {% else %}无法确定（UNVERIFIED）{% endif %}
+    </dd>
+
+    {% if s.order %}
+    <dt>参数号</dt>
+    <dd><a href="/params/{{ s.order.param_no }}">{{ s.order.param_no }}</a></dd>
+    <dt>基线前像值</dt><dd class="mono">{{ s.order.baseline_value }}</dd>
+    <dt>拟发布目标值</dt><dd class="mono">{{ s.order.intended_value }}</dd>
+    <dt>发布单时间</dt><dd>{{ s.order.created_at }} <span class="small">{{ s.order.reason }}</span></dd>
+    {% endif %}
+
+    {% if s.param %}
+    <dt>当前库值</dt>
+    <dd class="mono">{{ s.param.param_value }} {{ s.param.unit }}（version {{ s.param.version }}，updated_gxid={{ s.param.updated_gxid or 'NULL' }}）</dd>
+    {% endif %}
+
+    {% if s.prepared %}
+    <dt>预备时间 / owner</dt>
+    <dd>{{ s.prepared.prepared }} / {{ s.prepared.owner }} / 库 {{ s.prepared.database }} / xid {{ s.prepared.xid }}
+      {% if s.blocked_waiters %}<span class="badge badge-danger" style="margin-left:6px">{{ s.blocked_waiters }} 个会话正被该事务阻塞</span>{% endif %}
+    </dd>
+    {% endif %}
+  </dl>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>🔎 数据库证据（重启后据此区分提交/回滚）</h2>
+    <ul class="evi">
+      {% for line in s.evidence_lines %}
+        <li class="tone-{{ line.tone }}">{{ line.text }}</li>
+      {% endfor %}
+    </ul>
+
+    {% if s.locks %}
+    <h3>该预备事务当前持有的锁</h3>
+    <table class="data">
+      <thead><tr><th>类型</th><th>对象</th><th>模式</th><th>已授予</th></tr></thead>
+      <tbody>
+      {% for l in s.locks %}
+        <tr>
+          <td>{{ l.locktype }}</td>
+          <td class="mono">{{ l.relation or '—' }}</td>
+          <td>{{ l.mode }}</td>
+          <td>{% if l.granted %}✅{% else %}⏳ 等待中{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="small">PostgreSQL 中预备事务锁的 <span class="mono">pid</span> 为 NULL，本页通过 transactionid 锁反查其 virtualtransaction 列出。</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>📒 SQLite 协调端决定</h2>
+      {% if s.decision %}
+        <p>
+          <span class="badge badge-info" style="font-size:14px">{{ s.decision.decision }}</span>
+          <span class="small" style="margin-left:8px">{{ s.decision.created_at }} · {{ s.decision.decided_by }}</span>
+        </p>
+        <p>{{ s.decision.reason }}</p>
+        <p class="small">决定日志：<span class="mono">{{ coord_path }}</span>（协调端写入后不可变）</p>
+      {% else %}
+        <p class="lock-bad">SQLite 中没有该事务的提交/撤销决定。</p>
+        <p class="hint">按恢复规程：保留预备事务及其锁，不做收尾，状态提示“待确认”。值班员联系发布负责人确认后，可在下方人工补录决定并收尾。</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>🧾 网页办理登记簿</h2>
+      {% if s.record %}
+        <p><span class="badge badge-ok">{{ s.record.outcome }} / {{ s.record.handling }}</span>
+           <span class="small" style="margin-left:8px">{{ s.record.updated_at }} · {{ s.record.operator }}</span></p>
+        <p>{{ s.record.detail }}</p>
+        <p class="hint">该事务已办理。任何重复提交都不会再次修改参数。</p>
+      {% else %}
+        <p class="small">尚未登记。若数据库已收尾而网页曾在登记前退出，重启后请走“证据补登记”。</p>
+      {% endif %}
+
+      {% if s.events %}
+      <h3>操作/审计时间线</h3>
+      <ul class="timeline">
+        {% for e in s.events %}
+          <li><span class="t">{{ e.created_at }}</span><b>{{ e.event }}</b>
+            {% if e.operator %} · {{ e.operator }}{% endif %}
+            {% if e.detail %}<div class="small">{{ e.detail }}</div>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>🧑‍🔧 收尾操作</h2>
+
+  {% if s.record %}
+    <form method="post" action="/txn/{{ s.gxid }}/finalize" class="inline">
+      <input type="hidden" name="operator" value="{{ s.record.operator }}">
+      <button class="btn btn-ghost" type="submit">重复调用收尾接口（验证幂等：不会再改参数）</button>
+    </form>
+
+  {% elif s.state in ['OPEN_COMMIT', 'OPEN_ABORT'] %}
+    {% set choice = s.decision.decision %}
+    <form method="post" action="/txn/{{ s.gxid }}/finalize" class="form-row">
+      <label class="field">办理人<input type="text" name="operator" value="值班员"></label>
+      <button class="btn {{ 'btn-success' if choice == 'COMMIT' else 'btn-danger' }}" type="submit">
+        按 SQLite 决定执行 {{ 'COMMIT PREPARED（提交发布）' if choice == 'COMMIT' else 'ROLLBACK PREPARED（撤销发布）' }}
+      </button>
+      {% if crash_demo %}
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+        <input type="checkbox" name="crash_after_pg" value="1"> 收尾后、登记前立即退出进程（演示重启恢复）
+      </label>
+      {% endif %}
+    </form>
+
+  {% elif s.state == 'OPEN_AWAITING' %}
+    <div class="banner banner-warn">事务与锁保持不动。请先与发布负责人/设备侧核对，再人工补录决定：</div>
+    <div class="grid grid-2">
+      <form method="post" action="/txn/{{ s.gxid }}/manual-decision" class="card" style="margin:0">
+        <input type="hidden" name="choice" value="COMMIT">
+        <h3>确认无误 → 提交发布</h3>
+        <label class="field">办理人<input type="text" name="operator" value="值班员"></label>
+        <label class="field" style="margin:8px 0">确认说明<textarea name="note" placeholder="与谁核对、依据哪张变更单…"></textarea></label>
+        {% if crash_demo %}
+        <label class="field" style="flex-direction:row;align-items:center;gap:6px;margin-bottom:8px">
+          <input type="checkbox" name="crash_after_pg" value="1"> 收尾后、登记前退出（演示重启）
+        </label>
+        {% endif %}
+        <button class="btn btn-success" type="submit">补录 COMMIT 并 COMMIT PREPARED</button>
+      </form>
+      <form method="post" action="/txn/{{ s.gxid }}/manual-decision" class="card" style="margin:0">
+        <input type="hidden" name="choice" value="ABORT">
+        <h3>确认作废 → 撤销发布</h3>
+        <label class="field">办理人<input type="text" name="operator" value="值班员"></label>
+        <label class="field" style="margin:8px 0">确认说明<textarea name="note"></textarea></label>
+        <button class="btn btn-danger" type="submit">补录 ABORT 并 ROLLBACK PREPARED</button>
+      </form>
+    </div>
+
+  {% elif s.state in ['RECONCILE_COMMIT', 'RECONCILE_ABORT'] %}
+    <form method="post" action="/txn/{{ s.gxid }}/register" class="form-row">
+      <label class="field">办理人<input type="text" name="operator" value="值班员"></label>
+      <button class="btn btn-primary" type="submit">
+        确认证据，补登记为{{ '已提交' if s.state == 'RECONCILE_COMMIT' else '已回滚' }}（不再次修改参数）
+      </button>
+    </form>
+
+  {% elif s.state.startswith('CONFLICT_') %}
+    <form method="post" action="/txn/{{ s.gxid }}/conflict" class="form-row" style="align-items:flex-start;flex-direction:column">
+      <label class="field" style="width:100%">冲突说明 / 后续补偿工单号
+        <textarea name="note" placeholder="例如：已通知设备侧停用该参数，工单 OPS-xxxx 跟进补偿发布"></textarea>
+      </label>
+      <label class="field">登记人<input type="text" name="operator" value="值班员"></label>
+      <button class="btn btn-warn" type="submit">指出冲突并登记（不改参数）</button>
+    </form>
+
+  {% elif s.state == 'UNVERIFIED' %}
+    <form method="post" action="/txn/{{ s.gxid }}/verify" class="form-row" style="align-items:flex-start;flex-direction:column">
+      <p class="hint" style="margin:0">请通过设备侧回执、备份、发布工单等人工核实库端到底是哪一种结果，再登记：</p>
+      <div class="form-row" style="margin:0">
+        <select name="claimed">
+          <option value="COMMITTED">核实结论：已提交 COMMITTED</option>
+          <option value="ROLLED_BACK">核实结论：已回滚 ROLLED_BACK</option>
+        </select>
+        <label class="field">办理人<input type="text" name="operator" value="值班员"></label>
+      </div>
+      <label class="field" style="width:100%">核实依据<textarea name="note"></textarea></label>
+      <button class="btn btn-warn" type="submit">提交人工核实结论（仅登记，不改参数）</button>
+    </form>
+  {% endif %}
+</div>
+
+{% endblock %}

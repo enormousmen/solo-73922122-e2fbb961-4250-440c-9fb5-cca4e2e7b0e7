@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if msg is defined and msg %}
+  <div class="banner banner-{{ tone|default('ok') }}">{{ msg }}</div>
+{% endif %}
+
+<section class="stat">
+  <div class="box"><div class="num">{{ params|length }}</div><div class="lbl">内置校准参数</div></div>
+  <div class="box"><div class="num">{{ txns|length }}</div><div class="lbl">相关事务/发布单</div></div>
+  <div class="box"><div class="num" style="color:#b45309">{{ open_count }}</div><div class="lbl">仍挂起（锁保留）</div></div>
+</section>
+
+<div class="card">
+  <h2>① 构造“发布到一半断掉”的样例</h2>
+  <p class="hint">
+    每个样例会生成独立参数号与事务号 <span class="code-pill mono">GX-...</span>，按真实 2PC 流程
+    写发布单 → 改参数 → <code>PREPARE TRANSACTION</code> → 协调端写 SQLite 决定 →（中断/收尾）。
+    可重复构造，互不阻塞。
+  </p>
+  <form method="post" action="/scenarios" class="form-row">
+    <label class="field" style="flex:1;min-width:320px">
+      中断时刻
+      <select name="kind">
+        {% for key, label in scenarios.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      指定参数号（留空=新建演示参数）
+      <input type="text" name="param_no" list="param-list" placeholder="留空即可">
+      <datalist id="param-list">
+        {% for p in params %}<option value="{{ p.param_no }}">{{ p.param_name }}</option>{% endfor %}
+      </datalist>
+    </label>
+    <button class="btn btn-primary" type="submit">构造并打开恢复页</button>
+  </form>
+  <p class="small">
+    建议演示路线：先造「挂起③无决定」→ 查看锁、尝试锁演示 → 人工确认提交；
+    再造「重启④/⑤」→ 不登记直接“重启网页”（Docker Compose 下 <code>docker compose restart web</code>）→
+    首页按事务号查询，看系统如何凭数据库证据区分已提交/已回滚并补登记。
+    {% if crash_demo %}当前已开启“收尾后、登记前崩溃”按钮（ENABLE_CRASH_DEMO=true）。{% endif %}
+  </p>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>② 校准参数（按号可点入）</h2>
+    <table class="data">
+      <thead><tr><th>参数号</th><th>名称/设备</th><th>当前值</th><th>版本</th><th>挂起</th></tr></thead>
+      <tbody>
+      {% for p in params %}
+        <tr>
+          <td><a href="/params/{{ p.param_no }}"><b>{{ p.param_no }}</b></a></td>
+          <td>{{ p.param_name }}<br><span class="small">{{ p.device_no }}</span></td>
+          <td class="mono">{{ p.param_value }} {{ p.unit }}</td>
+          <td>v{{ p.version }}</td>
+          <td>{% if p.open_count %}<span class="badge badge-warn">{{ p.open_count }} 挂起</span>{% else %}<span class="small">—</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>③ 事务恢复队列</h2>
+    <p class="hint">未完结事项排在前面；状态由 PostgreSQL 证据 + SQLite 决定 + 网页登记簿共同判定。</p>
+    <table class="data">
+      <thead><tr><th>事务号 / 参数</th><th>判定状态</th><th>协调决定</th><th>登记</th></tr></thead>
+      <tbody>
+      {% for t in txns %}
+        <tr>
+          <td>
+            <a href="/txn/{{ t.gxid }}" class="mono">{{ t.gxid }}</a>
+            {% if t.order %}<br><span class="small">{{ t.order.param_no }}</span>{% endif %}
+          </td>
+          <td><span class="badge badge-{{ t.tone }}">{{ t.state_label }}</span></td>
+          <td>
+            {% if t.decision %}
+              <span class="badge badge-info">{{ t.decision.decision }}</span>
+              <div class="small">{{ t.decision.decided_by }}</div>
+            {% else %}<span class="small">无决定</span>{% endif %}
+          </td>
+          <td>{% if t.record %}<span class="badge badge-ok">{{ t.record.handling }}</span>{% else %}<span class="small">未登记</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="small">还没有事务，先用上方表单构造一个样例。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}未找到{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>未找到{{ kind }}：<span class="mono">{{ no }}</span></h2>
+  <p>PostgreSQL、SQLite 协调决定库和网页登记簿中均无匹配记录。请核对号码后重新查询。</p>
+  <p><a class="btn btn-primary" href="/">返回总览</a></p>
+</div>
+{% endblock %}

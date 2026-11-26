@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}查询：{{ q }}{% endblock %}
+{% block content %}
+<p class="small"><a href="/">← 返回总览</a></p>
+<div class="card">
+  <h2>“{{ q }}” 的查询结果</h2>
+
+  <h3>校准参数（{{ result.params|length }}）</h3>
+  <table class="data">
+    <thead><tr><th>参数号</th><th>设备号</th><th>名称</th><th>当前值</th><th>版本</th></tr></thead>
+    <tbody>
+    {% for p in result.params %}
+      <tr>
+        <td><a href="/params/{{ p.param_no }}"><b>{{ p.param_no }}</b></a></td>
+        <td>{{ p.device_no }}</td>
+        <td>{{ p.param_name }}</td>
+        <td class="mono">{{ p.param_value }} {{ p.unit }}</td>
+        <td>v{{ p.version }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="small">没有匹配的参数号/设备号/名称。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:20px">事务（{{ result.txns|length }}）</h3>
+  <table class="data">
+    <thead><tr><th>事务号</th><th>参数</th><th>状态</th><th>协调决定</th></tr></thead>
+    <tbody>
+    {% for t in result.txns %}
+      <tr>
+        <td><a href="/txn/{{ t.gxid }}" class="mono">{{ t.gxid }}</a></td>
+        <td>{% if t.order %}{{ t.order.param_no }}{% else %}<span class="small">无发布单</span>{% endif %}</td>
+        <td><span class="badge badge-{{ t.tone }}">{{ t.state_label }}</span></td>
+        <td>{% if t.decision %}<span class="badge badge-info">{{ t.decision.decision }}</span>{% else %}<span class="small">无</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="small">没有匹配的事务号（也检查了 SQLite 决定/登记簿）。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

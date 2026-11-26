@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    # 2PC 必须允许预备事务（默认 max_prepared_transactions=0）
+    command: ["postgres", "-c", "max_prepared_transactions=100"]
+    environment:
+      POSTGRES_USER: recovery
+      POSTGRES_PASSWORD: recovery_pw
+      POSTGRES_DB: caldb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recovery -d caldb"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://recovery:recovery_pw@db:5432/caldb
+      COORD_SQLITE_PATH: /data/coord/coordinator.db
+      WEB_SQLITE_PATH: /data/web/recovery.db
+      ENABLE_CRASH_DEMO: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - coorddata:/data/coord
+      - webdata:/data/web
+    # 崩溃演示（收尾后登记前 os._exit）后自动拉起，模拟“重启后恢复”
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  coorddata:
+  webdata:
