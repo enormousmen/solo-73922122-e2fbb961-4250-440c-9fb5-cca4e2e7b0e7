@@ -28,6 +28,11 @@ services:
       COORD_SQLITE_PATH: /data/coord/coordinator.db
       WEB_SQLITE_PATH: /data/web/recovery.db
       ENABLE_CRASH_DEMO: "true"
+      # 发布台总名额=2：第 1 席普通，第 2 席为抢修设备 DEV-EMG-01 预留。
+      # 可在 db 的 max_prepared_transactions=100 上限内调大。
+      PUBLISH_MAX_SLOTS: "2"
+      EMERGENCY_DEVICE_NO: "DEV-EMG-01"
+      PUBLISH_LOCK_TIMEOUT_MS: "15000"
     ports:
       - "8000:8000"
     volumes:

@@ -9,7 +9,27 @@
   <div class="box"><div class="num">{{ params|length }}</div><div class="lbl">内置校准参数</div></div>
   <div class="box"><div class="num">{{ txns|length }}</div><div class="lbl">相关事务/发布单</div></div>
   <div class="box"><div class="num" style="color:#b45309">{{ open_count }}</div><div class="lbl">仍挂起（锁保留）</div></div>
+  {% if slot_snap %}
+  <div class="box">
+    <div class="num" style="color:{% if slot_snap.remaining == 0 %}var(--red){% else %}var(--green){% endif %}">
+      {{ slot_snap.remaining }}/{{ slot_snap.total }}
+    </div>
+    <div class="lbl"><a href="/publish">发布台剩余名额 · 抢修席 {{ slot_snap.reserved_remaining }}/1 →</a></div>
+  </div>
+  {% endif %}
 </section>
+
+{% if slot_snap %}
+<div class="card" style="padding:12px 18px">
+  <b>发布台名额：</b>
+  剩余 <b>{{ slot_snap.remaining }}</b> / 总 {{ slot_snap.total }} 席；
+  普通席 {{ slot_snap.general_remaining }}/{{ slot_snap.general_total }} 空闲；
+  第 {{ slot_snap.reserved_slot_no }} 席为
+  <b style="color:var(--red)">抢修预留席</b>
+  （{{ slot_snap.emergency_devices|join(' / ') }}，{{ '占用中' if slot_snap.reserved_used else '空闲' }}）。
+  <a class="btn btn-danger btn-sm" href="/publish" style="margin-left:10px">打开发布台 / 抢修放行演示</a>
+</div>
+{% endif %}
 
 <div class="card">
   <h2>① 构造“发布到一半断掉”的样例</h2>

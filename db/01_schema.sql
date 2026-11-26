@@ -50,5 +50,9 @@ INSERT INTO calibration_param (param_no, device_no, param_name, param_value, uni
 VALUES
     ('CAL-T-1001', 'DEV-T-01', '温度探头零点偏移', '0.1250', '℃', 3, NULL),
     ('CAL-P-2002', 'DEV-P-07', '压力传感器量程系数', '1.00320', 'MPa', 5, NULL),
-    ('CAL-V-3003', 'DEV-V-12', '电压通道增益修正',   '0.99875', 'V/V', 2, NULL)
+    ('CAL-V-3003', 'DEV-V-12', '电压通道增益修正',   '0.99875', 'V/V', 2, NULL),
+    -- 发布台名额演示：普通设备集中发布争抢的同一参数行
+    ('CAL-BULK-1001', 'DEV-BULK-01', '集中发布批次·主控回路参数', '2.4000', 'ratio', 7, NULL),
+    -- 抢修设备自有参数行（与集中发布不冲突，便于演示“及时更新”）
+    ('CAL-EMRG-0001', 'DEV-EMG-01', '抢修终端·现场校准系数', '8.8880', 'kV', 4, NULL)
 ON CONFLICT (param_no) DO NOTHING;

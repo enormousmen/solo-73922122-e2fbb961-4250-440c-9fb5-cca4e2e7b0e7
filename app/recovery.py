@@ -462,9 +462,10 @@ def list_transactions() -> list[dict[str, Any]]:
     gxids.update(r["gxid"] for r in sqlite_store.list_records())
 
     items = [inspect(g) for g in gxids]
-    # 未完结的排前面，再按创建时间/事务号倒序
+    # 未完结的排前面，再按创建时间/事务号倒序。
+    # 注意 order 可能为 None（例如库端存在没有发布单的预备事务），不能直接 .get。
     done_prefix = ("DONE_",)
-    items.sort(key=lambda s: (s["state"].startswith(done_prefix), s.get("order", {}).get("created_at") or "", s["gxid"]), reverse=False)
+    items.sort(key=lambda s: (s["state"].startswith(done_prefix), (s.get("order") or {}).get("created_at") or "", s["gxid"]), reverse=False)
     items.sort(key=lambda s: s["state"].startswith(done_prefix))
     return items
 

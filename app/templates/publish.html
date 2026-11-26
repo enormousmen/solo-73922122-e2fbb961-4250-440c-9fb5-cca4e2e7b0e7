@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}发布台名额 · 校准参数发布恢复台{% endblock %}
+{% block content %}
+
+{% if msg is defined and msg %}
+  <div class="banner banner-{{ tone|default('ok') }}">
+    {{ msg }}
+    {% if code %}<span class="code-pill" style="margin-left:8px">{{ code }}</span>{% endif %}
+  </div>
+{% endif %}
+
+<section class="stat" id="slot-stats"
+         data-total="{{ s.total }}" data-reserved="{{ s.reserved_slot_no }}">
+  <div class="box"><div class="num" id="num-remaining" style="color:var(--green)">{{ s.remaining }}</div><div class="lbl">剩余名额 / 共 <span id="num-total">{{ s.total }}</span> 席</div></div>
+  <div class="box"><div class="num" id="num-used" style="color:var(--amber)">{{ s.used }}</div><div class="lbl">占用中（建单→库端收尾）</div></div>
+  <div class="box"><div class="num" id="num-general">{{ s.general_remaining }}/{{ s.general_total }}</div><div class="lbl">普通席剩余（1..{{ s.reserved_slot_no - 1 }}）</div></div>
+  <div class="box"><div class="num" id="num-reserved" style="color:var(--red)">{{ s.reserved_remaining }}/1</div><div class="lbl">抢修预留席（第 {{ s.reserved_slot_no }} 席 · {{ s.emergency_devices|join(' / ') }}）</div></div>
+</section>
+
+{% if cfg_check and not cfg_check.ok %}
+  <div class="banner banner-danger">
+    <b>名额配置超出 PostgreSQL 上限：</b>{{ cfg_check.problems|join('；') }}
+    <div class="small">当前配置总名额={{ cfg_check.total }}，max_prepared_transactions={{ cfg_check.max_prepared_transactions }}，max_connections={{ cfg_check.max_connections }}。请用环境变量 PUBLISH_MAX_SLOTS 调小后重启网页。</div>
+  </div>
+{% else %}
+  <p class="small">
+    总名额 <b>{{ s.total }}</b> 可通过 <code>PUBLISH_MAX_SLOTS</code> 配置（须 ≤ PostgreSQL
+    <code>max_prepared_transactions={{ cfg_check.max_prepared_transactions if cfg_check else '?' }}</code>
+    并低于 <code>max_connections={{ cfg_check.max_connections if cfg_check else '?' }}</code> 安全余量）。
+    第 <b>{{ s.reserved_slot_no }}</b> 席只留给指定抢修设备
+    <b>{{ s.emergency_devices|join(' / ') }}</b>（环境变量 EMERGENCY_DEVICE_NO）。
+    席位就是 PostgreSQL 事务级 advisory lock：等参数行锁时也占席；PREPARE 后网页重启仍占；
+    库端直接 COMMIT/ROLLBACK PREPARED 后自动还席。看板每 2 秒自动刷新。
+  </p>
+{% endif %}
+
+<div class="card">
+  <h2>席位实时看板</h2>
+  <table class="data" id="slot-board">
+    <thead>
+      <tr><th>席号</th><th>类型</th><th>状态</th><th>事务号 / 设备 / 参数</th><th>库端直接收尾（不补登记）</th></tr>
+    </thead>
+    <tbody>
+    {% for slot in s.slots %}
+      <tr data-slot="{{ slot.slot_no }}">
+        <td><b>#{{ slot.slot_no }}</b></td>
+        <td>
+          {% if slot.kind == 'reserved' %}
+            <span class="badge badge-danger">抢修预留席</span>
+          {% else %}
+            <span class="badge badge-info">普通席</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not slot.occupied %}
+            <span class="badge badge-ok">空闲</span>
+          {% elif slot.phase == 'prepared' %}
+            <span class="badge badge-warn">{{ slot.phase_label }}</span>
+          {% elif slot.phase == 'waiting_lock' %}
+            <span class="badge badge-danger">{{ slot.phase_label }}</span>
+          {% else %}
+            <span class="badge badge-info">{{ slot.phase_label }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if slot.gxid %}
+            <a href="/txn/{{ slot.gxid }}" class="mono">{{ slot.gxid }}</a><br>
+            <span class="small">{{ slot.device_no or '—' }} {% if slot.param_no %}· {{ slot.param_no }}{% endif %}</span>
+          {% else %}<span class="small">—</span>{% endif %}
+        </td>
+        <td>
+          {% if slot.occupied and slot.phase == 'prepared' and slot.gxid %}
+            <form method="post" action="/publish/dba/{{ slot.gxid }}/commit" class="inline">
+              <button class="btn btn-success btn-sm" type="submit">库端直接提交</button>
+            </form>
+            <form method="post" action="/publish/dba/{{ slot.gxid }}/rollback" class="inline">
+              <button class="btn btn-danger btn-sm" type="submit">库端直接撤销</button>
+            </form>
+          {% elif slot.occupied %}
+            <span class="small">预备前连接（结束/失败即还席）</span>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="border-color:#fecaca">
+  <h2>🚨 一键演示：两个名额下的“抢修放行”</h2>
+  <p class="hint">
+    自动完成：① 用独立会话占住 <span class="code-pill">{{ bulk_param }}</span> 的行锁 →
+    ② 第一笔普通发布（{{ bulk_device }}）占第 1 席后阻塞在等锁 →
+    ③ 第二笔普通建单因普通席满被<b>拒绝</b>并给出原因 →
+    ④ 抢修设备 <b>{{ emergency_device }}</b> 用第 2 席（预留席）发布
+    <span class="code-pill">{{ emergency_param }}</span> 并快速提交，校准值立即更新。
+  </p>
+  <form method="post" action="/publish/demo-emergency" class="inline">
+    <button class="btn btn-danger" type="submit">▶ 运行抢修放行剧本（约 1 秒）</button>
+  </form>
+
+  {% if demo %}
+    <hr class="sep">
+    <h3>演示战报</h3>
+    <ul class="evi">
+      <li class="tone-warn">
+        普通发布 <a href="/txn/{{ demo.ordinary.gxid }}" class="mono">{{ demo.ordinary.gxid }}</a>
+        已占 <b>第 {{ demo.ordinary.slot_no }} 席（普通席）</b>，当前：{{ demo.ordinary.phase_label }}。
+      </li>
+      <li class="tone-danger">
+        第二笔普通建单被拒绝（<span class="code-pill">{{ demo.rejected_ordinary.code }}</span>）：
+        {{ demo.rejected_ordinary.message }}
+      </li>
+      <li class="tone-ok">
+        抢修发布 <a href="/txn/{{ demo.emergency.gxid }}" class="mono">{{ demo.emergency.gxid }}</a>
+        由设备 <b>{{ demo.emergency.device_no }}</b> 受理，使用
+        <b>第 {{ demo.emergency.slot_no }} 席（{% if demo.emergency.seat_kind == 'reserved' %}抢修预留席{% else %}普通席{% endif %}）</b>，
+        参数 {{ demo.emergency.param_no }}：
+        <span class="mono">{{ demo.emergency.value_before }}</span> →
+        <span class="mono lock-ok">{{ demo.emergency.value_after }}</span>，
+        并已 COMMIT PREPARED；提交后预留席立即归还。
+      </li>
+      <li class="tone-muted">{{ demo.note }}</li>
+    </ul>
+  {% endif %}
+
+  <div class="form-row" style="margin-top:14px">
+    <form method="post" action="/publish/blocker/hold" class="inline">
+      <input type="hidden" name="param_no" value="{{ bulk_param }}">
+      <button class="btn btn-warn btn-sm" type="submit">① 制造/保持参数行锁（{{ bulk_param }}）</button>
+    </form>
+    <form method="post" action="/publish/blocker/release" class="inline">
+      <button class="btn btn-primary btn-sm" type="submit">② 释放行锁，让普通发布继续到 PREPARE</button>
+    </form>
+    <form method="post" action="/publish/fail-demo" class="inline">
+      <input type="hidden" name="device_no" value="{{ bulk_device }}">
+      <button class="btn btn-ghost btn-sm" type="submit">③ 模拟建单失败（未 PREPARE，应立即还席）</button>
+    </form>
+    {% if crash_demo %}
+    <form method="post" action="/publish/crash-before-prepare" class="inline"
+          onsubmit="return confirm('将在 PREPARE 前 os._exit(43) 杀掉网页进程，验证 Compose 重启后席位已归还。确定？');">
+      <button class="btn btn-ghost btn-sm" type="submit">④ 模拟预备前崩溃退出（重启后应已还席）</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if blockers %}
+    <p class="small lock-bad">当前行锁道具：{% for b in blockers %}<span class="code-pill">{{ b.param_no }}（{{ b.key }}）</span>{% endfor %}</p>
+  {% endif %}
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>受理一笔发布</h2>
+    <p class="hint">满额时返回 303 并在本页红色横幅给出拒绝原因；成功后进入事务恢复页。</p>
+    <form method="post" action="/publish/orders">
+      <div class="form-row">
+        <label class="field" style="flex:1;min-width:220px">
+          设备号（抢修设备请填 {{ emergency_device }}）
+          <input type="text" name="device_no" value="DEV-BULK-03" list="device-list" required>
+          <datalist id="device-list">
+            <option value="{{ emergency_device }}">抢修预留设备</option>
+            <option value="DEV-BULK-01"></option>
+            <option value="DEV-BULK-02"></option>
+            <option value="DEV-BULK-03"></option>
+          </datalist>
+        </label>
+        <label class="field" style="flex:1;min-width:220px">
+          参数号（留空=新建演示参数）
+          <input type="text" name="param_no" list="publish-param-list" placeholder="{{ bulk_param }}">
+          <datalist id="publish-param-list">
+            <option value="{{ bulk_param }}"></option>
+            <option value="{{ emergency_param }}"></option>
+          </datalist>
+        </label>
+      </div>
+      <div class="form-row">
+        <label class="field" style="flex:1;min-width:200px">
+          目标值（留空=自动加 0.0137）
+          <input type="text" name="intended_value" placeholder="留空自动生成">
+        </label>
+        <label class="field" style="flex:2;min-width:260px">
+          事由
+          <input type="text" name="reason" value="网页手工受理发布">
+        </label>
+      </div>
+      <button class="btn btn-primary" type="submit">受理并执行到 PREPARE</button>
+      <span class="small">普通设备只有 {{ s.general_total }} 个普通席；填抢修设备号可使用第 {{ s.reserved_slot_no }} 席。</span>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>后台发布任务 / 接口</h2>
+    {% if jobs %}
+      <table class="data">
+        <thead><tr><th>事务号</th><th>状态</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for j in jobs %}
+          <tr>
+            <td class="mono">
+              {% if j.gxid %}<a href="/txn/{{ j.gxid }}">{{ j.gxid }}</a>{% else %}—{% endif %}
+            </td>
+            <td>
+              {% if j.state == 'prepared' %}<span class="badge badge-warn">prepared（占席）</span>
+              {% elif j.state == 'running' %}<span class="badge badge-danger">running/等锁</span>
+              {% elif j.state == 'rejected' %}<span class="badge badge-danger">rejected: {{ j.code }}</span>
+              {% else %}<span class="badge badge-muted">{{ j.state }}</span>{% endif %}
+            </td>
+            <td class="small">{{ j.error or ('席位 #' ~ (j.result.slot_no if j.result else '?')) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="small">暂无本进程后台任务（一键演示会产生一个等锁的普通发布）。网页重启后任务表清空，但预备态席位仍在左侧看板中。</p>
+    {% endif %}
+    <hr class="sep">
+    <p class="small">
+      机器接口：<code>GET /api/slots</code> 实时名额；
+      <code>POST /api/publish/orders</code>（JSON：device_no/param_no/intended_value），
+      满额返回 <code>409</code> 与 <code>code/message/slots</code>。
+    </p>
+  </div>
+</div>
+
+<script>
+// 轻量轮询：只重绘看板与数字，不打扰页面上的表单输入。
+function esc(x) {
+  return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function dbaForms(slot) {
+  if (slot.occupied && slot.phase === 'prepared' && slot.gxid) {
+    var g = encodeURIComponent(slot.gxid);
+    return '<form method="post" action="/publish/dba/' + g + '/commit" class="inline">'
+      + '<button class="btn btn-success btn-sm" type="submit">库端直接提交</button></form> '
+      + '<form method="post" action="/publish/dba/' + g + '/rollback" class="inline">'
+      + '<button class="btn btn-danger btn-sm" type="submit">库端直接撤销</button></form>';
+  }
+  if (slot.occupied) return '<span class="small">预备前连接（结束/失败即还席）</span>';
+  return '—';
+}
+function render(s) {
+  document.getElementById('num-remaining').textContent = s.remaining;
+  document.getElementById('num-total').textContent = s.total;
+  document.getElementById('num-used').textContent = s.used;
+  document.getElementById('num-general').textContent = s.general_remaining + '/' + s.general_total;
+  document.getElementById('num-reserved').textContent = s.reserved_remaining + '/1';
+  var html = '';
+  s.slots.forEach(function (slot) {
+    var typeBadge = slot.kind === 'reserved'
+      ? '<span class="badge badge-danger">抢修预留席</span>'
+      : '<span class="badge badge-info">普通席</span>';
+    var stateBadge;
+    if (!slot.occupied) stateBadge = '<span class="badge badge-ok">空闲</span>';
+    else if (slot.phase === 'prepared') stateBadge = '<span class="badge badge-warn">' + esc(slot.phase_label) + '</span>';
+    else if (slot.phase === 'waiting_lock') stateBadge = '<span class="badge badge-danger">' + esc(slot.phase_label) + '</span>';
+    else stateBadge = '<span class="badge badge-info">' + esc(slot.phase_label) + '</span>';
+    var who = '—';
+    if (slot.gxid) {
+      who = '<a href="/txn/' + encodeURIComponent(slot.gxid) + '" class="mono">' + esc(slot.gxid) + '</a><br>'
+        + '<span class="small">' + esc(slot.device_no || '—')
+        + (slot.param_no ? ' · ' + esc(slot.param_no) : '') + '</span>';
+    }
+    html += '<tr data-slot="' + slot.slot_no + '"><td><b>#' + slot.slot_no + '</b></td><td>'
+      + typeBadge + '</td><td>' + stateBadge + '</td><td>' + who + '</td><td>'
+      + dbaForms(slot) + '</td></tr>';
+  });
+  document.querySelector('#slot-board tbody').innerHTML = html;
+}
+async function poll() {
+  try {
+    var r = await fetch('/api/slots', {cache: 'no-store'});
+    if (r.ok) render(await r.json());
+  } catch (e) { /* 重启瞬间忽略 */ }
+}
+setInterval(poll, 2000);
+</script>
+
+{% endblock %}
